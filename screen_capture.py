@@ -5,8 +5,8 @@ import pyautogui
 from PIL import Image, ImageChops
 from fpdf import FPDF
 
-path_image1 = 'C:/Users/User/Desktop/cbi_video/photo_main'
-path_image2 = 'C:/Users/User/Desktop/cbi_video/photo'
+path_image1 = os.path.dirname(os.path.abspath(__file__)) + "\\" + "photo_main"
+path_image2 = os.path.dirname(os.path.abspath(__file__)) + "\\" + "photo"
 
 
 if not os.path.exists(path_image1):
