@@ -1,69 +1,107 @@
-import cv2
+import cv2, datetime
 import numpy as np
 
-def detect_shape_in_frame(frame):
-    # Для обнаружения кругов
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    gray = cv2.medianBlur(gray, 5)
+def create_mask(frame, vertices, rgb):
+    mask = np.zeros_like(frame)
+    cv2.fillPoly(mask, [vertices],rgb)
+    return mask
 
-    circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, dp=1, minDist=20,
+def set_resolution_16_9(capture, width=1920, height=1080):
+
+    capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+def detect_min_circle_in_frame(frame, vertices,x_center,y_center):
+    # Ограничение области видимости в кадре
+    x, y, w, h = cv2.boundingRect(vertices)
+    frame_roi = frame[y:y+h, x:x+w]
+
+    # Преобразование изображения в оттенки серого
+    gray = cv2.cvtColor(frame_roi, cv2.COLOR_BGR2GRAY)
+
+    # Выполнение Гауссового размытия для сглаживания шумов
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    # Поиск кругов с помощью преобразования Хафа
+    circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, dp=1, minDist=20,
                                param1=50, param2=30, minRadius=0, maxRadius=0)
 
-    # Для обнаружения квадратов
-    _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
-
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    max_area_circle = 0
-    max_circle = None
-    max_area_square = 0
-    max_square = None
-
-    # Поиск наибольшего круга и квадрата
+    min_circle = None
+    min_circle_radius = float('inf')
+    
+    # Выбор минимального круга из всех обнаруженных
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
         for (x, y, r) in circles:
-            area = np.pi * r * r
-            if area > max_area_circle:
-                max_area_circle = area
-                max_circle = (x, y, r)
+            if r < min_circle_radius:
+                min_circle_radius = r
+                min_circle = (x + x_center, y + y_center, r)
 
-    for contour in contours:
-        approx = cv2.approxPolyDP(contour, 0.04 * cv2.arcLength(contour, True), True)
+    if min_circle is not None:
+        x, y, r = min_circle
+        cv2.circle(frame, (x, y), r, (255, 255, 255), 4)
 
-        if len(approx) == 4:
-            area = cv2.contourArea(contour)
-            if area > max_area_square:
-                max_area_square = area
-                max_square = contour
-
-    # Рисование обнаруженного круга или квадрата и вывод сообщения
-    if max_circle is not None:
-        x, y, r = max_circle
-        cv2.circle(frame, (x, y), r, (0, 255, 0), 4)
-        cv2.putText(frame, "Circle", (x - 30, y + r + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-    elif max_square is not None:
-        cv2.drawContours(frame, [max_square], 0, (0, 0, 255), 4)
-        cv2.putText(frame, "Pup", (max_square[0][0][0] - 50, max_square[0][0][1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
     return frame
 
 def main():
     capture = cv2.VideoCapture(0)  # Используем видеозахват с камеры (можно использовать 1, 2 и т.д. для других устройств)
-    count = 0
+
+    # Установка разрешения 16:9
+    set_resolution_16_9(capture)
+
+    # Определение размеров кадра
+    width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    # Определение вершин полигона для области видимости в центре
+    rect_width = width // 2
+    rect_height = height // 2
+    x_center = (width - rect_width) // 2
+    y_center = (height - rect_height) // 2
+    bottom_left = (x_center, y_center + rect_height)
+    bottom_right = (x_center + rect_width, y_center + rect_height)
+    top_left = (x_center, y_center)
+    top_right = (x_center + rect_width, y_center)
+    vertices = np.array([[bottom_left, bottom_right, top_right, top_left]], dtype=np.int32)
+
+
+
+    # r, g, b = 255,255,255
+
+    rgb = [(255,0,0),
+           (0,255,0),
+           (0,0,255)]
     while True:
+        time = int((datetime.datetime.now() - datetime.datetime(1, 1, 1, 0, 0)).total_seconds())
         ret, frame = capture.read()
 
         if not ret:
             print("Ошибка чтения кадра")
             break
 
-        frame_with_shape = detect_shape_in_frame(frame)
+        # Создание маски для ограничения области видимости
+        mask = create_mask(frame, vertices,rgb[time%3])
 
-        cv2.imshow("Kadr", frame_with_shape)
 
+        # Применение маски кадру
+        frame_with_mask = cv2.bitwise_and(frame, mask)
+
+        # r = (r+10)%256
+        # g = (g+10)%256
+        # b = (b+10)%256
+        # frame_with_mask[:, :, 0] = b
+        # frame_with_mask[:, :, 1] = g
+        # frame_with_mask[:, :, 2] = r
+
+        # Поиск и отображение минимального круга в области видимости
+        frame_with_min_circle = detect_min_circle_in_frame(frame_with_mask, vertices,x_center,y_center)
+
+        cv2.imshow("Обнаружение минимального круга", frame_with_min_circle)
+        
         if cv2.waitKey(1) & 0xFF == ord('q'):
+            ret = False
             break
-            
+
 
     capture.release()
     cv2.destroyAllWindows()
